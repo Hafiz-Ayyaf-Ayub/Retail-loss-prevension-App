@@ -2,18 +2,20 @@ import threading
 from ultralytics import YOLO
 
 PERSON_CLASS_ID = 0
-CONFIDENCE_THRESHOLD = 0.5        # insaan ke liye (pehle jaisa)
+CONFIDENCE_THRESHOLD = 0.35        # insaan ke liye (pehle jaisa)
 # Items (bottle/cup/phone) ke liye alag, kam threshold: haath mein pakdi
 # cheez ungliyon se aadhi chhup jati hai, is liye YOLO ki confidence kam
 # aati hai (aksar 0.3-0.5) aur 0.5 par woh box hi gayab ho jata tha.
-ITEM_CONFIDENCE_THRESHOLD = 0.35
-INFERENCE_SIZE = 320  # 480 se kam kiya - ONNX export bhi isi size ka hai, CPU pe kaafi tez
+ITEM_CONFIDENCE_THRESHOLD = 0.04
+INFERENCE_SIZE = 1080  # 480 se kam kiya - ONNX export bhi isi size ka hai, CPU pe kaafi tez
 
 # YOLO/COCO dataset ke standard class IDs — inhe hum "item" ke tor par track karenge
 ITEM_CLASS_IDS = {
     39: "Bottle",
     41: "Cup",
     67: "Mobile Phone",
+    73 : "book",
+    
 }
 
 TRACKED_CLASSES = [PERSON_CLASS_ID] + list(ITEM_CLASS_IDS.keys())

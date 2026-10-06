@@ -37,7 +37,7 @@ CROP_PADDING = 0.10    # box ke charon taraf 10% extra jagah
 # MediaPipe apne andar image ko chhota (lagbhag 256px) kar leta hai, is liye
 # bari crop dene ka koi faida nahi - ulta convert/copy mein waqt jata hai.
 # Isliye crop ki lambi side ko is se zyada nahi hone dete.
-MAX_CROP_SIDE = 320
+MAX_CROP_SIDE = 144
 
 # HAATH KA CENTRE: kalai (wrist) haath ki sirf "jad" hai, jabke bottle
 # hatheli/ungliyon mein hoti hai. Isliye kalai + pinky + index + thumb ke

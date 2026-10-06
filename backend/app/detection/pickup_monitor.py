@@ -44,6 +44,15 @@ RELEASE_GRACE_SECONDS = 1.2
 POSE_GATE_RATIO = 0.6
 POSE_GATE_MIN_PX = 40
 
+# ---- Temporary ON/OFF switch ----
+# MediaPipe abhi sirf "HELD by G1" wala visual hint deta hai - concealment
+# ka asal faisla (Step 3) isse judaa nahi hai. Is liye False karne se koi
+# zaroori feature nahi tootega, sirf yeh magenta highlight gayab ho jayegi.
+# CPU/thermal load kam karne ke liye abhi ke liye False kar dein - jab
+# wapis chahiye ho, sirf yeh line True kar dena, baaki kuch chhedne ki
+# zaroorat nahi.
+POSE_ENABLED = True
+
 # SPEED: MediaPipe pose bhaari hai (profile mein 100-230ms). Isliye har
 # detection-frame par nahi, har POSE_EVERY_N_DETECTIONS-wein detection-frame
 # par chalate hain, aur beech mein pichla pose dobara istemal karte hain.
@@ -87,6 +96,14 @@ def refresh_poses(frame, persons, items, cache, detect_fn):
     cache: har camera ka apna dict (camera_stream ki state se aata hai).
     detect_fn: function jo (frame, person) leke pose deta hai.
     """
+    if not POSE_ENABLED:
+        # MediaPipe bilkul band - kisi ko bhi pose nahi milega, aur
+        # detect_fn kabhi call hi nahi hoga (CPU load zero)
+        for p in persons:
+            p["pose"] = None
+        cache.clear()
+        return
+
     now = time.time()
     seen_ids = set()
 

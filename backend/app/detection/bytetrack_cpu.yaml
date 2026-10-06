@@ -1,0 +1,11 @@
+# ByteTrack — CPU store CCTV (YOLO ~8 FPS, persons + items)
+# File: app/detection/bytetrack_cpu.yaml
+
+tracker_type: bytetrack
+
+track_high_thresh: 0.50
+track_low_thresh: 0.12
+new_track_thresh: 0.45
+track_buffer: 36
+match_thresh: 0.90
+fuse_score: True

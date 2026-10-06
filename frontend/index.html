@@ -2,135 +2,225 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Retail Loss Protection Dashboard</title>
+    
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
 
-    <header class="navbar">
-        <h1>🛡️ Retail Loss Protection System</h1>
-        <span class="status-badge stopped" id="statusBadge">⏹ STOPPED</span>
-    </header>
+    <!-- ===== Left sidebar ===== -->
+    <aside class="sidebar">
+        <svg class="logo" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l8 3v6c0 5-3.5 9-8 11-4.5-2-8-6-8-11V5z"/></svg>
 
-    <main class="dashboard">
-        <section class="video-section">
-            <h2>Live Camera Feed</h2>
+        <nav class="nav">
+            <a href="#top" class="active">
+                <svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8v10h-6v-6H9v6H3z"/></svg>Dashboard
+            </a>
+            <a href="#cameraGrid">
+                <svg viewBox="0 0 24 24"><rect x="2" y="6" width="14" height="12" rx="2"/><path d="M16 10l6-3v10l-6-3z"/></svg>Live Feed
+            </a>
+            <a href="#analytics">
+                <svg viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Analytics
+            </a>
+            <a href="#historyBox">
+                <svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h7M9 17h7"/></svg>Reports
+            </a>
+            <a href="#top">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.9l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.9-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.9.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.9 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.9l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.9.3h0a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5h0a1.7 1.7 0 001.9-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.9v0a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg>Settings
+            </a>
+        </nav>
 
-            <div class="camera-grid" id="cameraGrid">
+        <div class="sys-online"><span class="dot"></span><div>System Online<small>v1.0.0</small></div></div>
+    </aside>
 
-                <div class="camera-box" data-cam="1">
-                    <div class="video-wrapper">
-                        <img id="videoFeed1" src="" alt="Camera 1 feed" class="video-frame">
-                        <div id="pausedOverlay1" class="paused-overlay">
-                            <p>⏹ Feed Not Started</p>
+    <div class="page" id="top">
+
+        <!-- ===== Top bar ===== -->
+        <header class="navbar">
+            <div class="brand">
+                <h1>Retail Loss Protection System</h1>
+                <p>Smarter Security • Safer Stores • Better Business</p>
+            </div>
+            <div class="nav-right">
+                <span class="status-badge stopped" id="statusBadge">⏹ STOPPED</span>
+                <button class="round-btn" title="Notifications">
+                    <svg viewBox="0 0 24 24"><path d="M6 16v-5a6 6 0 1112 0v5l2 2H4zM10 21h4"/></svg>
+                </button>
+                <button class="round-btn" title="Account">
+                    <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+                </button>
+            </div>
+        </header>
+
+        <main class="dashboard">
+
+            <!-- ===== Analytics tiles ===== -->
+            <aside class="controls-panel" id="analytics">
+                <div class="stats-box">
+                    <h2>Analytics <span class="analytics-note">(All Cameras)</span></h2>
+
+                    <div class="stat-row stat-blue">
+                        <span class="stat-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg></span>
+                        <div class="stat-text">
+                            <span class="stat-label">Currently Present</span>
+                            <span class="stat-value" id="personCount">0</span>
                         </div>
-                        <span class="cam-label">Camera 1</span>
-                        <div id="zoneOverlay1" class="zone-overlay" data-cam="1">
-                            <span class="zone-label">MONITORED ZONE</span>
-                            <span class="zone-remove" data-cam="1">✕</span>
-                            <span class="zone-resize" data-cam="1"></span>
+                        <span class="stat-deco"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg></span>
+                    </div>
+
+                    <div class="stat-row stat-violet">
+                        <span class="stat-icon"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2 20c0-3.5 3.5-5.5 7-5.5s7 2 7 5.5"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14.5c3 0 5 1.5 5 4"/></svg></span>
+                        <div class="stat-text">
+                            <span class="stat-label">Total Unique Visitors</span>
+                            <span class="stat-value" id="totalCount">0</span>
+                        </div>
+                        <span class="stat-deco"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2 20c0-3.5 3.5-5.5 7-5.5s7 2 7 5.5"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14.5c3 0 5 1.5 5 4"/></svg></span>
+                    </div>
+
+                    <div class="stat-row stat-green">
+                        <span class="stat-icon"><svg viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3M14 4h5a2 2 0 012 2v12a2 2 0 01-2 2h-5"/></svg></span>
+                        <div class="stat-text">
+                            <span class="stat-label">Total IN</span>
+                            <span class="stat-value" id="entryCount">0</span>
+                        </div>
+                        <span class="stat-deco"><svg viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3M14 4h5a2 2 0 012 2v12a2 2 0 01-2 2h-5"/></svg></span>
+                    </div>
+
+                    <div class="stat-row stat-red">
+                        <span class="stat-icon"><svg viewBox="0 0 24 24"><path d="M14 17l5-5-5-5M19 12H7M10 4H5a2 2 0 00-2 2v12a2 2 0 002 2h5"/></svg></span>
+                        <div class="stat-text">
+                            <span class="stat-label">Total OUT</span>
+                            <span class="stat-value" id="exitCount">0</span>
+                        </div>
+                        <span class="stat-deco"><svg viewBox="0 0 24 24"><path d="M14 17l5-5-5-5M19 12H7M10 4H5a2 2 0 00-2 2v12a2 2 0 002 2h5"/></svg></span>
+                    </div>
+
+                    <div class="stat-row stat-amber">
+                        <span class="stat-icon"><svg viewBox="0 0 24 24"><rect x="2" y="6" width="14" height="12" rx="2"/><path d="M16 10l6-3v10l-6-3z"/></svg></span>
+                        <div class="stat-text">
+                            <span class="stat-label">Camera Status</span>
+                            <span class="stat-value" id="cameraStatus">Inactive</span>
+                        </div>
+                        <span class="stat-deco"><svg viewBox="0 0 24 24"><rect x="2" y="6" width="14" height="12" rx="2"/><path d="M16 10l6-3v10l-6-3z"/></svg></span>
+                    </div>
+                </div>
+            </aside>
+
+            <section class="video-section">
+                <h2>Live Camera Feed</h2>
+
+                <div class="camera-grid" id="cameraGrid">
+
+                    <!-- ================= CAMERA 1 ================= -->
+                    <div class="camera-box" data-cam="1">
+                        <div class="video-wrapper">
+                            <img id="videoFeed1" src="" alt="Camera 1 feed" class="video-frame">
+                            <div id="pausedOverlay1" class="paused-overlay">
+                                <p>⏹ Feed Not Started</p>
+                            </div>
+                            <span class="cam-label">Camera 1</span>
+                            <div id="zoneOverlay1" class="zone-overlay" data-cam="1">
+                                <span class="zone-label">MONITORED ZONE</span>
+                                <span class="zone-remove" data-cam="1">✕</span>
+                                <span class="zone-resize" data-cam="1"></span>
+                            </div>
+                        </div>
+
+                        <div class="cam-controls">
+                            <select id="deviceSelect1" class="device-select">
+                                <option value="0">Laptop Camera</option>
+                                <option value="1" selected>Mobile Camera</option>
+                            </select>
+
+                            <button class="mini-btn mini-upload" data-action="upload" data-cam="1" title="Upload Video">📁 Upload video</button>
+                            <input type="file" id="videoFileInput1" accept="video/*" class="hidden">
+
+                            <button class="mini-btn mini-start" data-action="start" data-cam="1" title="Start">▶</button>
+                            <button class="mini-btn mini-pause" data-action="pause" data-cam="1" title="Pause" disabled>⏸</button>
+                            <button class="mini-btn mini-stop" data-action="stop" data-cam="1" title="Stop" disabled>⏹</button>
+
+                            <button class="mini-btn mini-zone" data-action="zone-toggle" data-cam="1">Zone: On</button>
+
+                            <!-- Video speed: only visible while a video FILE is playing (JS removes hidden) -->
+                            <select class="speed-select" data-cam="1" title="Video speed" hidden>
+                                <option value="1">1x</option>
+                                <option value="0.8">0.8x</option>
+                                <option value="0.5">0.5x</option>
+                            </select>
                         </div>
                     </div>
-                    <div class="cam-controls">
-                        <select id="deviceSelect1" class="device-select">
-                            <option value="0">Laptop camera  </option>
-                            <option value="1" selected>Mobile Camera </option>
-                            <option value="file">🎞 Video File</option>
-                        </select>
-                        <input type="file" id="videoFileInput1" accept="video/*" class="hidden">
-                        <button class="mini-btn mini-start" data-action="start" data-cam="1">▶</button>
-                        <button class="mini-btn mini-pause" data-action="pause" data-cam="1" disabled>⏸</button>
-                        <button class="mini-btn mini-stop" data-action="stop" data-cam="1" disabled>⏹</button>
-                        <button class="mini-btn mini-zone" data-action="zone-toggle" data-cam="1">Zone: On</button>
-                    </div>
-                </div>
 
-                <div class="camera-box" data-cam="2">
-                    <div class="video-wrapper">
-                        <img id="videoFeed2" src="" alt="Camera 2 feed" class="video-frame">
-                        <div id="pausedOverlay2" class="paused-overlay">
-                            <p>⏹ Feed Not Started</p>
+                    <!-- ================= CAMERA 2 ================= -->
+                    <div class="camera-box" data-cam="2">
+                        <div class="video-wrapper">
+                            <img id="videoFeed2" src="" alt="Camera 2 feed" class="video-frame">
+                            <div id="pausedOverlay2" class="paused-overlay">
+                                <p>⏹ Feed Not Started</p>
+                            </div>
+                            <span class="cam-label">Camera 2</span>
+                            <div id="zoneOverlay2" class="zone-overlay" data-cam="2">
+                                <span class="zone-label">MONITORED ZONE</span>
+                                <span class="zone-remove" data-cam="2">✕</span>
+                                <span class="zone-resize" data-cam="2"></span>
+                            </div>
                         </div>
-                        <span class="cam-label">Camera 2</span>
-                        <div id="zoneOverlay2" class="zone-overlay" data-cam="2">
-                            <span class="zone-label">MONITORED ZONE</span>
-                            <span class="zone-remove" data-cam="2">✕</span>
-                            <span class="zone-resize" data-cam="2"></span>
+
+                        <div class="cam-controls">
+                            <select id="deviceSelect2" class="device-select">
+                                <option value="0" selected>Laptop Camera</option>
+                                <option value="1">Mobile Camera</option>
+                            </select>
+
+                            <button class="mini-btn mini-upload" data-action="upload" data-cam="2" title="Upload Video">📁 Upload video</button>
+                            <input type="file" id="videoFileInput2" accept="video/*" class="hidden">
+
+                            <button class="mini-btn mini-start" data-action="start" data-cam="2" title="Start">▶</button>
+                            <button class="mini-btn mini-pause" data-action="pause" data-cam="2" title="Pause" disabled>⏸</button>
+                            <button class="mini-btn mini-stop" data-action="stop" data-cam="2" title="Stop" disabled>⏹</button>
+
+                            <button class="mini-btn mini-zone" data-action="zone-toggle" data-cam="2">Zone: On</button>
+
+                            <select class="speed-select" data-cam="2" title="Video speed" hidden>
+                                <option value="1">1x</option>
+                                <option value="0.8">0.8x</option>
+                                <option value="0.5">0.5x</option>
+                            </select>
                         </div>
                     </div>
-                    <div class="cam-controls">
-                        <select id="deviceSelect2" class="device-select">
-                            
-                            <option value="0" selected>Laptop camera </option>
-                            <option value="1">Mobile Camera  </option>
-                            <option value="file">🎞 Video File</option>
-                        </select>
-                        <input type="file" id="videoFileInput2" accept="video/*" class="hidden">
-                        <button class="mini-btn mini-start" data-action="start" data-cam="2">▶</button>
-                        <button class="mini-btn mini-pause" data-action="pause" data-cam="2" disabled>⏸</button>
-                        <button class="mini-btn mini-stop" data-action="stop" data-cam="2" disabled>⏹</button>
-                        <button class="mini-btn mini-zone" data-action="zone-toggle" data-cam="2">Zone: On</button>
-                    </div>
+
                 </div>
 
-                
-               
+                <button id="closeFullscreenBtn" class="fullscreen-close hidden">✕ Close</button>
 
-            </div>
-
-            <button id="closeFullscreenBtn" class="fullscreen-close hidden">✕ Close</button>
-
-            <div class="alerts-box">
-                <h2>⚠ Active Alerts</h2>
-                <p class="no-alerts" id="noAlertsMsg">No suspicious activity detected.</p>
-                <div id="alertsList"></div>
-            </div>
-
-            <div class="alerts-box">
-                <h2>🎒 Concealment Alerts</h2>
-                <p class="no-alerts" id="noConcealMsg">No item concealment detected.</p>
-                <div id="concealList"></div>
-            </div>
-
-            <div class="alerts-box">
-                <h2>📋 Alert History Log</h2>
-                <p class="no-alerts" id="noHistoryMsg">No incidents recorded yet.</p>
-                <div id="historyList"></div>
-            </div>
-        </section>
-
-        <aside class="controls-panel">
-            <div class="stats-box">
-                <h2>Analytics <span class="analytics-note">(Camera 1)</span></h2>
-
-                <div class="stat-row">
-                    <span class="stat-label">Currently Present</span>
-                    <span class="stat-value" id="personCount">0</span>
+                <div class="alerts-box" id="alertsBox">
+                    <h2>⚠ Active Alerts</h2>
+                    <p class="no-alerts" id="noAlertsMsg">No suspicious activity detected.</p>
+                    <div id="alertsList"></div>
                 </div>
 
-                <div class="stat-row">
-                    <span class="stat-label">Total Unique Visitors</span>
-                    <span class="stat-value" id="totalCount">0</span>
+                <div class="alerts-box">
+                    <h2>🎒 Concealment Alerts</h2>
+                    <p class="no-alerts" id="noConcealMsg">No item concealment detected.</p>
+                    <div id="concealList"></div>
                 </div>
 
-                <div class="stat-row">
-                    <span class="stat-label">Total IN</span>
-                    <span class="stat-value stat-in" id="entryCount">0</span>
+                <div class="alerts-box" id="historyBox">
+                    <h2>📋 Alert History Log</h2>
+                    <p class="no-alerts" id="noHistoryMsg">No incidents recorded yet.</p>
+                    <div id="historyList"></div>
                 </div>
-
-                <div class="stat-row">
-                    <span class="stat-label">Total OUT</span>
-                    <span class="stat-value stat-out" id="exitCount">0</span>
-                </div>
-
-                <div class="stat-row">
-                    <span class="stat-label">Camera Status</span>
-                    <span class="stat-value" id="cameraStatus">Inactive</span>
-                </div>
-            </div>
-        </aside>
-    </main>
+            </section>
+        </main>
+    </div>
 
     <script src="/static/js/dashboard.js"></script>
+    <script>
+        // Sidebar: highlight the link you clicked
+        document.querySelectorAll(".nav a").forEach(a => a.addEventListener("click", () => {
+            document.querySelectorAll(".nav a").forEach(x => x.classList.remove("active"));
+            a.classList.add("active");
+        }));
+    </script>
 </body>
 </html>

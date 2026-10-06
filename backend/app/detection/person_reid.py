@@ -237,8 +237,15 @@ def _save_debug_comparison(new_crop, candidate_id, score):
         pass  # debug save kabhi bhi asal detection ko na roke
 
 
-def match_or_register(signature, person_crop=None, face_encoding=None):
+def match_or_register(signature, person_crop=None, face_encoding=None, exclude_ids=None):
     """
+    exclude_ids: un Global IDs ka set jo is match se BAHAR rakhne hain. Caller
+    yahan woh IDs deta hai jo isi camera frame ke DOOSRE logon ke paas pehle se
+    hain - jo do log ek hi frame mein ek saath khare hain wo lazmi alag alag
+    log hain, chahe kapre bilkul same hon, is liye naya banda unki ID kabhi
+    nahi le sakta (yehi "teeno ko G1 mil gayi" wala masla hal karta hai).
+    Default None = purane jaisa behaviour (koi ID exclude nahi).
+
     Do signals se purane logon ke saath match karta hai (chahe wo kisi bhi
     camera se aaye hon, kyunke registry saari cameras mein shared hai):
 
@@ -263,6 +270,8 @@ def match_or_register(signature, person_crop=None, face_encoding=None):
         best_face_distance = None
         if face_encoding is not None:
             for gid, data in registry.items():
+                if exclude_ids and gid in exclude_ids:
+                    continue
                 dist = _best_face_distance_against_samples(face_encoding, data.get("face_encodings", []))
                 if dist is not None and (best_face_distance is None or dist < best_face_distance):
                     best_face_distance = dist
@@ -273,6 +282,8 @@ def match_or_register(signature, person_crop=None, face_encoding=None):
         best_clothes_score = 0
         if signature is not None:
             for gid, data in registry.items():
+                if exclude_ids and gid in exclude_ids:
+                    continue
                 score = _best_score_against_samples(signature, data["signatures"])
                 if score > best_clothes_score:
                     best_clothes_score = score

@@ -94,7 +94,7 @@ async def camera_upload_video(cam_id: int, file: UploadFile = File(...), loop: b
     dest_path = os.path.join(UPLOAD_DIR, safe_name)
 
     with open(dest_path, "wb") as f:
-        while chunk := await file.read(1024 * 1024):
+        while chunk := await file.read(2080 * 2080):
             f.write(chunk)
 
     success = start_camera_from_file(cam_id=cam_id, file_path=dest_path, loop=loop)

@@ -17,17 +17,12 @@ const noHistoryMsgEl = document.getElementById("noHistoryMsg");
 
 let statsInterval = null;
 
-// Zone on/off state yahan JS mein bhi track karte hain (har camera ke liye
-// alag), taake iska button hamesha kaam kare - chahe zone overlay khud
-// is waqt "hidden" ho ya visible. (Pehle sirf overlay ke ANDAR wala
-// remove-button hi zone wapas ON kar sakta tha, aur woh khud overlay ke
-// sath hi ghayab ho jata tha - isliye "wapas on karne" ka koi tareeqa
-// nahi bachta tha, sirf server restart hi state reset karta tha.)
+// Zone on/off state per camera
 const zoneEnabledState = {};
 
 function toggleZone(camId) {
     const key = String(camId);
-    const currentlyEnabled = zoneEnabledState[key] !== false; // default: True
+    const currentlyEnabled = zoneEnabledState[key] !== false;
     const newEnabled = !currentlyEnabled;
     zoneEnabledState[key] = newEnabled;
 
@@ -57,6 +52,17 @@ function setCamButtons(camId, { startDisabled, pauseDisabled, stopDisabled }) {
     document.querySelector(`.mini-stop[data-cam="${camId}"]`).disabled = stopDisabled;
 }
 
+// ---- Helper: koi bhi camera chal raha hai? ----
+async function isAnyCameraRunning() {
+    try {
+        const response = await fetch("/stats-all");
+        const data = await response.json();
+        return data.cameras.some(c => c.camera_active);
+    } catch {
+        return false;
+    }
+}
+
 function markCamRunning(camId) {
     const overlay = document.getElementById(`pausedOverlay${camId}`);
     const img = document.getElementById(`videoFeed${camId}`);
@@ -65,10 +71,9 @@ function markCamRunning(camId) {
     overlay.classList.add("hidden");
     setCamButtons(camId, { startDisabled: true, pauseDisabled: false, stopDisabled: false });
 
-    if (camId === "1" || camId === 1) {
-        statusBadge.textContent = "● LIVE";
-        statusBadge.className = "status-badge";
-    }
+    statusBadge.textContent = "● LIVE";
+    statusBadge.className = "status-badge";
+
     startStatsPolling();
 }
 
@@ -78,6 +83,7 @@ function markCamFailed(camId, message) {
     overlay.classList.remove("hidden");
 }
 
+// ---- Video upload handler ----
 async function uploadAndStartVideo(camId, file) {
     const overlay = document.getElementById(`pausedOverlay${camId}`);
     overlay.querySelector("p").textContent = "⏳ Uploading video…";
@@ -107,14 +113,7 @@ async function uploadAndStartVideo(camId, file) {
 async function startCam(camId) {
     const deviceValue = document.getElementById(`deviceSelect${camId}`).value;
 
-    // ---- "Video File" chuna gaya hai: HAMESHA naya file-picker kholo,
-    // koi purani video khud-ba-khud reuse nahi karni (user ne yahi mangi hai) ----
-    if (deviceValue === "file") {
-        document.getElementById(`videoFileInput${camId}`).click();
-        return;
-    }
-
-    // ---- Live camera (Laptop / Mobile) ----
+    // Live camera (Laptop / Mobile)
     const response = await fetch(`/camera/start/${camId}?device_index=${deviceValue}`, { method: "POST" });
     const data = await response.json();
 
@@ -129,9 +128,12 @@ async function pauseCam(camId) {
     await fetch(`/camera/pause/${camId}`, { method: "POST" });
     setCamButtons(camId, { startDisabled: false, pauseDisabled: true, stopDisabled: false });
 
-    if (camId === "1" || camId === 1) {
+    const anyRunning = await isAnyCameraRunning();
+    if (!anyRunning) {
         statusBadge.textContent = "⏸ PAUSED";
         statusBadge.className = "status-badge paused";
+    } else {
+        fetchStats();
     }
 }
 
@@ -146,17 +148,24 @@ async function stopCam(camId) {
     overlay.classList.remove("hidden");
     setCamButtons(camId, { startDisabled: false, pauseDisabled: true, stopDisabled: true });
 
-    if (camId === "1" || camId === 1) {
+    const anyRunning = await isAnyCameraRunning();
+    if (!anyRunning) {
         statusBadge.textContent = "⏹ STOPPED";
         statusBadge.className = "status-badge stopped";
         personCountEl.textContent = "0";
+        totalCountEl.textContent = "0";
+        entryCountEl.textContent = "0";
+        exitCountEl.textContent = "0";
         cameraStatusEl.textContent = "Inactive";
+    } else {
+        fetchStats();
     }
 }
 
+// ---- Control panel event delegation ----
 document.querySelectorAll(".cam-controls").forEach(panel => {
     panel.addEventListener("click", (e) => {
-        e.stopPropagation(); // taake fullscreen toggle na ho jaye button dabane par
+        e.stopPropagation();
         const btn = e.target.closest(".mini-btn");
         if (!btn) return;
 
@@ -167,6 +176,10 @@ document.querySelectorAll(".cam-controls").forEach(panel => {
         if (action === "pause") pauseCam(camId);
         if (action === "stop") stopCam(camId);
         if (action === "zone-toggle") toggleZone(camId);
+        if (action === "upload") {
+            // Upload button — hidden file input kholo
+            document.getElementById(`videoFileInput${camId}`).click();
+        }
     });
 });
 
@@ -179,9 +192,31 @@ document.querySelectorAll("input[type=file][id^='videoFileInput']").forEach(inpu
         if (file) {
             uploadAndStartVideo(camId, file);
         }
-        input.value = ""; // taake wahi file dobara chuni ja sake to bhi change fire ho
+        input.value = "";
     });
 });
+
+// ---- Video speed (sirf video FILE par asar; live camera par nahi) ----
+document.querySelectorAll(".speed-select").forEach(sel => {
+    sel.addEventListener("change", () => {
+        fetch(`/camera/speed/${sel.dataset.cam}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ speed: parseFloat(sel.value) })
+        }).catch(err => console.log(`Camera ${sel.dataset.cam} speed change failed:`, err));
+    });
+});
+
+// Backend ki /stats-all se aaye source_type ke hisab se selector dikhao/chhupao
+function updateSpeedSelect(cam) {
+    const sel = document.querySelector(`.speed-select[data-cam="${cam.camera_id}"]`);
+    if (!sel) return;
+    sel.hidden = !(cam.camera_active && cam.source_type === "file");
+    if (!sel.hidden && document.activeElement !== sel) {
+        const v = String(cam.playback_speed);
+        if ([...sel.options].some(o => o.value === v)) sel.value = v;
+    }
+}
 
 // ---- Alerts / History rendering ----
 
@@ -231,24 +266,36 @@ function renderHistory(history) {
     });
 }
 
-// ---- Stats polling (sab cameras se milakar) ----
+// ============================================================
+// STATS POLLING — COMBINED ANALYTICS
+// ============================================================
 
 async function fetchStats() {
     try {
         const response = await fetch("/stats-all");
         const data = await response.json();
 
-        // Sirf Camera 1 ki analytics sidebar mein dikhayein (jaisa pehle se ho raha tha)
-        const cam1 = data.cameras.find(c => c.camera_id === 1);
-        if (cam1) {
-            personCountEl.textContent = cam1.person_count;
-            totalCountEl.textContent = cam1.total_unique_visitors;
-            entryCountEl.textContent = cam1.entry_count;
-            exitCountEl.textContent = cam1.exit_count;
-            cameraStatusEl.textContent = cam1.camera_active ? "Active" : "Inactive";
+        const activeCams = data.cameras.filter(c => c.camera_active);
+
+        const totalPresent = data.cameras.reduce((sum, c) => sum + (c.person_count || 0), 0);
+        const totalUnique = data.cameras.reduce((sum, c) => sum + (c.total_unique_visitors || 0), 0);
+        const totalEntry = data.cameras.reduce((sum, c) => sum + (c.entry_count || 0), 0);
+        const totalExit = data.cameras.reduce((sum, c) => sum + (c.exit_count || 0), 0);
+
+        data.cameras.forEach(updateSpeedSelect);
+
+        personCountEl.textContent = totalPresent;
+        totalCountEl.textContent = totalUnique;
+        entryCountEl.textContent = totalEntry;
+        exitCountEl.textContent = totalExit;
+
+        if (activeCams.length > 0) {
+            const camNums = activeCams.map(c => c.camera_id).join(", ");
+            cameraStatusEl.textContent = `Active (Cam ${camNums})`;
+        } else {
+            cameraStatusEl.textContent = "Inactive";
         }
 
-        // Sab active cameras ke alerts milakar dikhayein, camera number ke sath
         let combinedAlerts = [];
         let combinedConceal = [];
 
@@ -270,7 +317,7 @@ async function fetchStats() {
 }
 
 function startStatsPolling() {
-    if (statsInterval) return; // pehle se chal raha ho to dobara mat shuru karo
+    if (statsInterval) return;
     fetchStats();
     statsInterval = setInterval(fetchStats, 1000);
 }
@@ -282,7 +329,7 @@ function stopStatsPolling() {
     }
 }
 
-// ---- Adjustable Monitored Zone (drag + resize + remove) ----
+// ---- Adjustable Monitored Zone ----
 
 function setupZoneOverlay(camId) {
     const overlay = document.getElementById(`zoneOverlay${camId}`);
@@ -292,14 +339,13 @@ function setupZoneOverlay(camId) {
     const resizeHandle = overlay.querySelector(".zone-resize");
     const removeBtn = overlay.querySelector(".zone-remove");
 
-    let mode = null; // "drag" ya "resize", warna null
+    let mode = null;
     let startX, startY, startLeft, startTop, startWidth, startHeight;
 
     function toPercent(px, totalPx) {
         return (px / totalPx) * 100;
     }
 
-    // Zone ke andar click/drag hone se fullscreen mode trigger na ho, isliye click bubble roka
     overlay.addEventListener("click", (e) => e.stopPropagation());
 
     function sendZoneUpdate() {
@@ -317,7 +363,7 @@ function setupZoneOverlay(camId) {
     }
 
     overlay.addEventListener("mousedown", (e) => {
-        if (e.target === resizeHandle || e.target === removeBtn) return; // wo apna kaam khud karenge
+        if (e.target === resizeHandle || e.target === removeBtn) return;
         mode = "drag";
         startX = e.clientX;
         startY = e.clientY;
@@ -339,7 +385,7 @@ function setupZoneOverlay(camId) {
 
     removeBtn.addEventListener("click", (e) => {
         e.stopPropagation();
-        toggleZone(camId); // shared function - dashboard ke persistent button ke sath sync rehta hai
+        toggleZone(camId);
     });
 
     document.addEventListener("mousemove", (e) => {
@@ -352,7 +398,6 @@ function setupZoneOverlay(camId) {
             let newLeft = startLeft + dx;
             let newTop = startTop + dy;
 
-            // wrapper ke bahar na jaye
             newLeft = Math.max(0, Math.min(newLeft, wrapperRect.width - overlay.offsetWidth));
             newTop = Math.max(0, Math.min(newTop, wrapperRect.height - overlay.offsetHeight));
 
@@ -376,7 +421,7 @@ function setupZoneOverlay(camId) {
 
     document.addEventListener("mouseup", () => {
         if (mode) {
-            sendZoneUpdate(); // mouse chhodte hi backend ko naya zone bhej do
+            sendZoneUpdate();
         }
         mode = null;
     });

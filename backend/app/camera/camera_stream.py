@@ -1,5 +1,33 @@
+import os
+
+# ---------------------------------------------------------------------------
+# CPU THREAD-OVERSUBSCRIPTION FIX
+# MASLA: is app mein 3 bhaari models EK SATH (alag threads mein) chalte hain -
+# YOLO (yolo stage), MediaPipe Pose (mp_detect stage), aur basket ka YOLO-World
+# model (basket_detector.py ka apna thread). Har library APNE TAUR PAR "sab
+# CPU cores mere liye" soch kar apna internal thread-pool banati hai. Jab
+# teeno ek sath chalte hain, to woh EK DOOSRE se cores ke liye takrate hain
+# (jitne CPU cores hain us se kai guna zyada threads), aur har ek ka apna kaam
+# ULTA slow ho jata hai (profiler mein yolo 199ms se 657ms tak chala gaya tha).
+#
+# HAL: har library ko batao ke sirf ITNE threads istemal karo (poore cores
+# nahi), taake teeno milkar bhi CPU ko "oversubscribe" na karein.
+#
+# ZAROORI: yeh lines cv2/torch/onnxruntime import hone se PEHLE honi chahiye -
+# yeh libraries apna thread-pool IMPORT hote hi bana leti hain, baad mein
+# environment variable badalne ka koi asar nahi hota.
+#
+# Number (2) apne CPU ke physical cores se kam rakhna. Jaise 4-core CPU par 2,
+# 8-core par 3-4. Bohat kam rakhoge to ek model khud hi slow ho jayega.
+# ---------------------------------------------------------------------------
+os.environ.setdefault("OMP_NUM_THREADS", "8")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "8")
+os.environ.setdefault("MKL_NUM_THREADS", "8")
+
 import cv2
+cv2.setNumThreads(8)   # OpenCV (resize/cvtColor wagera) ka apna thread-pool bhi
 import time
+import threading
 from collections import deque
 from app.detection.detector import track_all
 from app.detection.zone_monitor import update_zone_tracking
@@ -9,13 +37,22 @@ from app.detection import item_tracker
 from app.detection import incident_logger
 from app.detection import pose_monitor
 from app.detection import pickup_monitor
+from app.detection import detection_worker
 from app import profiler
 from app.config import Settings
 
 LINE_Y_RATIO = 0.5
 CROSSING_COOLDOWN = 1.5
 
-DETECT_EVERY_N_FRAMES = 2  #  CPU-only ke liye aur tez - 1 se barha kar 2 kiya
+# NOTE: ab istemal nahi hoti - detection ab detection_worker.py mein background
+# thread mein chalti hai, jo khud apni raftaar se chalta hai (busy-check khud
+# throttle karta hai). Constant sirf compatibility ke liye rakhi hai, delete nahi ki.
+DETECT_EVERY_N_FRAMES = 2
+
+# Basket ka box screen par dikhana hai ya nahi (testing ke liye True rakho,
+# taake pata chale basket sahi jagah detect ho raha hai; live/production mein
+# False kar dena - orange box customer-facing screen par ajeeb lagega).
+SHOW_BASKETS = True
 
 # Incident video clip ke liye: item ghaib hone se PEHLE aur BAAD ka kitna
 # footage shamil karna hai. Total clip lagbhag PRE + POST second ki hogi,
@@ -37,6 +74,117 @@ VIDEO_BUFFER_SECONDS = PRE_INCIDENT_SECONDS + POST_INCIDENT_SECONDS + 4
 # dikhta hai (kyunke usay barabar size ke box mein fit karne ke liye zyada
 # scale-down hota hai). Isliye frame ki height ke hisab se scale nikalte hain.
 REFERENCE_FRAME_HEIGHT = 480
+
+
+# ---------------------------------------------------------------------------
+# LIVE CAMERA KA "LAG" (mobile/IP camera mein video peeche reh jana) - FIX
+#
+# MASLA: cv2.VideoCapture andar se frames ki ek QUEUE rakhta hai. Laptop
+# webcam mein frame tab banta hai jab hum maangte hain, isliye koi lag nahi.
+# Lekin mobile camera (IP Webcam / DroidCam / RTSP) network par 30 frame/sec
+# bhejta rehta hai. Agar hamara loop (decode + encode + browser ko bhejna)
+# zara bhi slow ho, to queue mein purane frames jama hote jate hain, aur hum
+# hamesha queue ka SABSE PURANA frame dekhte hain -> movement pehle ho jati
+# hai, video baad mein aati hai, aur delay waqt ke sath barhta jata hai.
+#
+# HAL: har live camera ke liye ALAG thread jo lagatar padhta rahe aur sirf
+# SABSE TAAZA frame rakhe (purane phenk de). generate_frames() jab bhi read()
+# kare, use hamesha taaza frame mile. Queue ban hi nahi sakti.
+#
+# Yeh cv2.VideoCapture jaisa hi dikhta hai (isOpened/read/release/set/get),
+# isliye generate_frames() mein kuch badalna nahi para.
+# NOTE: sirf LIVE camera par lagta hai. Video FILE par nahi (file ko free-run
+# karte to woh bohat tez chal jati).
+# ---------------------------------------------------------------------------
+class _ThreadedCapture:
+    def __init__(self, cap, name="camera"):
+        self._cap = cap
+        self._lock = threading.Lock()
+        self._new_frame = threading.Condition(self._lock)
+        self._frame = None
+        self._seq = 0            # har naye frame par barhta hai
+        self._last_returned = 0  # read() ne aakhri baar kaunsa seq diya
+        self._alive = True       # False = stream khatam/toot gayi
+        self._stop = False
+        self._thread = threading.Thread(target=self._reader_loop, daemon=True, name=f"capture-{name}")
+        self._thread.start()
+
+    def _reader_loop(self):
+        failures = 0
+        try:
+            while not self._stop:
+                ret, frame = self._cap.read()
+                if not ret or frame is None:
+                    failures += 1
+                    if failures >= 30:   # lagatar ~30 dafa fail = stream sach mein band
+                        break
+                    time.sleep(0.02)
+                    continue
+                failures = 0
+                with self._new_frame:
+                    self._frame = frame          # purana frame yahin phenk diya
+                    self._seq += 1
+                    self._new_frame.notify_all()
+        finally:
+            with self._new_frame:
+                self._alive = False
+                self._new_frame.notify_all()
+            try:
+                self._cap.release()
+            except Exception:
+                pass
+
+    def isOpened(self):
+        return self._alive and self._cap.isOpened()
+
+    def read(self, timeout=2.0):
+        """Hamesha SABSE TAAZA frame deta hai. Naya frame na aaye to us ke aane
+        tak intezaar (busy-loop nahi). Wahi frame do dafa nahi milta."""
+        with self._new_frame:
+            end = time.time() + timeout
+            while self._seq == self._last_returned:
+                if not self._alive:
+                    return False, None
+                remaining = end - time.time()
+                if remaining <= 0:
+                    return False, None
+                self._new_frame.wait(remaining)
+            self._last_returned = self._seq
+            return True, self._frame
+
+    def set(self, prop, value):
+        return self._cap.set(prop, value)
+
+    def get(self, prop):
+        return self._cap.get(prop)
+
+    def release(self):
+        self._stop = True
+        self._thread.join(timeout=3.0)   # thread khud cap.release() karta hai
+        with self._new_frame:
+            self._alive = False
+
+
+def _open_capture(source):
+    """
+    VideoCapture kholta hai. Network stream (http/rtsp/rtmp) ho to FFmpeg ko
+    "low latency" mode mein kholta hai (apni taraf ki buffering band) - yeh
+    option sirf isi open ke liye lagta hai, baad mein pehle jaisa wapis.
+    """
+    is_network = isinstance(source, str) and source.lower().startswith(("http://", "https://", "rtsp://", "rtmp://"))
+    if not is_network:
+        return cv2.VideoCapture(source)
+
+    key = "OPENCV_FFMPEG_CAPTURE_OPTIONS"
+    old = os.environ.get(key)
+    os.environ[key] = "fflags;nobuffer|flags;low_delay"
+    try:
+        return cv2.VideoCapture(source, cv2.CAP_FFMPEG)
+    finally:
+        if old is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = old
 
 
 def _new_camera_state():
@@ -70,6 +218,7 @@ def _new_camera_state():
         "frame_counter": 0,
         "last_persons": [],
         "last_items": [],
+        "last_baskets": [],
         # Speed optimization: har track ID ka global_id ek dafa nikal kar yaad rakhte hain
         "global_id_cache": {},
         # Speed optimization: har detection par pose nahi chalate, pichla pose
@@ -86,6 +235,11 @@ def _new_camera_state():
         # ho jayen, phir export ho kar yahan se hat jate hain.
         # Format: {"incident_id", "alert", "export_at"}
         "pending_video_exports": [],
+        # detection_worker.py (background thread) is list mein NAYE incidents
+        # daalta hai, aur neeche _flush_ready_video_exports() (MAIN thread) isay
+        # padh/khaali karta hai - do threads ek hi list chhoote hain, is liye
+        # lock zaroori hai (warna beech mein daali gayi entry gum ho sakti hai).
+        "pending_lock": threading.Lock(),
     }
 
 
@@ -130,7 +284,8 @@ def start_camera(cam_id=1, device_index=None):
         state["device_index"] = device_index
 
     if state["capture"] is None or not state["capture"].isOpened():
-        state["capture"] = cv2.VideoCapture(state["device_index"])
+        raw_capture = _open_capture(state["device_index"])
+        state["capture"] = raw_capture
 
         # Speed optimization: webcam ko explicitly chhoti resolution + MJPG
         # format pe set karo. Agar yeh na kiya jaye to bohat se webcams apni
@@ -141,6 +296,11 @@ def start_camera(cam_id=1, device_index=None):
         state["capture"].set(cv2.CAP_PROP_FRAME_WIDTH, 480)
         state["capture"].set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         state["capture"].set(cv2.CAP_PROP_FPS, 30)
+        state["capture"].set(cv2.CAP_PROP_BUFFERSIZE, 3)   # jahan backend support kare wahan andar ki queue 1 frame ki
+
+        # Live camera: alag thread se lagatar taaza frame padho (lag/queue fix)
+        if raw_capture.isOpened():
+            state["capture"] = _ThreadedCapture(raw_capture, name=f"cam{cam_id}")
 
     state["is_paused"] = False
     return state["capture"].isOpened()
@@ -194,7 +354,7 @@ def stop_camera(cam_id=1):
     state["current_person_count"] = 0
 
 
-def draw_tracks(frame, persons, items, zone_box=None, zone_enabled=True):
+def draw_tracks(frame, persons, items, baskets=None, zone_box=None, zone_enabled=True):
     # Zone ab video ke andar draw nahi hoti — frontend ka adjustable overlay hi
     # zone dikhata hai. Yahan zone_box sirf detection ke liye use hota hai (generate_frames mein).
 
@@ -236,6 +396,13 @@ def draw_tracks(frame, persons, items, zone_box=None, zone_enabled=True):
             for point in pose.values():
                 if point is not None:
                     cv2.circle(frame, point, max(3, box_thickness * 2), (0, 255, 255), -1)
+
+    if SHOW_BASKETS and baskets:
+        for basket in baskets:
+            bx1, by1, bx2, by2 = basket["x1"], basket["y1"], basket["x2"], basket["y2"]
+            cv2.rectangle(frame, (bx1, by1), (bx2, by2), (0, 165, 255), box_thickness)
+            cv2.putText(frame, "Basket", (bx1, by1 - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, item_font_scale, (0, 165, 255), text_thickness)
 
     for item in items:
         x1, y1, x2, y2 = item["x1"], item["y1"], item["x2"], item["y2"]
@@ -340,13 +507,16 @@ def _flush_ready_video_exports(state, cam_id):
     se nikal kar .mp4 save karta hai, aur metadata bhi (ek sath, video_path
     ke sath) log karta hai. Har frame par call hota hai (halka operation hai).
     """
-    if not state["pending_video_exports"]:
+    with state["pending_lock"]:
+        pending = list(state["pending_video_exports"])
+
+    if not pending:
         return
 
     now = time.time()
     still_pending = []
 
-    for entry in state["pending_video_exports"]:
+    for entry in pending:
         if now < entry["export_at"]:
             still_pending.append(entry)
             continue
@@ -374,7 +544,38 @@ def _flush_ready_video_exports(state, cam_id):
             "video_path": video_path,
         })
 
-    state["pending_video_exports"] = still_pending
+    # Sirf woh entries hatao jo ABHI is call mein fully process ho chuki hain.
+    # Blind reassignment (state["pending_video_exports"] = still_pending) khatarnak
+    # tha: agar background worker (detection_worker.py) isi lamhe ek NAYI entry
+    # add kar raha ho, to woh yahan reassign se gum ho jati. Ab sirf "done" wale
+    # incident_ids nikalte hain, baaki (still-waiting + koi naya jo abhi aaya) rehte hain.
+    done_ids = {e["incident_id"] for e in pending} - {e["incident_id"] for e in still_pending}
+    with state["pending_lock"]:
+        state["pending_video_exports"] = [
+            e for e in state["pending_video_exports"] if e["incident_id"] not in done_ids
+        ]
+
+
+def _pace_file_playback(state):
+    """
+    Video FILE ko uski apni FPS par chalata hai (real-time). Iske bagair file
+    jitni tez ho sake utni tez chalti hai (25 frame 0.05s mein!), aur time.time()
+    par based sab timer (2s sustained concealment, 1.2s hold grace, 0.7s basket
+    memory) video ke hisab se bohat chhote ho jate hain - file test ka natija
+    jhoota aata hai. Live camera par yeh lagta hi nahi (woh khud real-time hai).
+    """
+    fps = state["capture"].get(cv2.CAP_PROP_FPS) or 30.0
+    fps = min(max(fps, 5.0), 60.0)
+    interval = 1.0 / fps
+
+    now = time.time()
+    next_t = state.get("_file_next_t")
+    if next_t is None or now - next_t > 1.0:   # pehli dafa, ya pause/loop restart ke baad dobara sync
+        next_t = now
+    wait = next_t - now
+    if wait > 0:
+        time.sleep(wait)
+    state["_file_next_t"] = next_t + interval
 
 
 def generate_frames(cam_id=1):
@@ -403,117 +604,30 @@ def generate_frames(cam_id=1):
                 continue
             break
 
+        if state["source_type"] == "file":
+            _pace_file_playback(state)
+
         height, width = frame.shape[:2]
         line_y = int(height * LINE_Y_RATIO)
         zone_box = _zone_box_px(state, width, height)
 
         state["frame_counter"] += 1
-        # Multiple cameras ho to unka detection ek hi waqt pe na chale
-        # (warna CPU pe ek sath "burst" aata hai aur stutter zyada mehsoos
-        # hota hai) - isliye har camera ko cam_id ke hisab se alag "phase"
-        # diya hai, taake unka YOLO turn baari-baari (staggered) aaye.
-        run_detection = (state["frame_counter"] % DETECT_EVERY_N_FRAMES) == (cam_id % DETECT_EVERY_N_FRAMES)
 
-        if run_detection:
-            with profiler.stage(cam_id, "yolo"):
-                persons, items = track_all(frame, cam_id)
+        # Bhaari kaam (YOLO + Re-ID + Pose + Basket + Concealment) ab background
+        # thread mein hota hai (detection_worker.py) - yeh call turant (non-blocking)
+        # wapis aati hai, chahe andar YOLO 200ms le raha ho. Agar worker abhi pichle
+        # frame par kaam kar raha ho to yeh frame chupke se chhor diya jata hai
+        # (koi crash/queue-jama nahi hota) - jo bhi PICHLA result maujood hai woh
+        # neeche seedha state se utha lete hain.
+        with profiler.stage(cam_id, "submit"):
+            detection_worker.submit_frame(frame, cam_id, state, zone_box, line_y, POST_INCIDENT_SECONDS)
 
-            # Jo track IDs ab maujood nahi, unka cached global_id bhi hata do
-            current_ids = {p["id"] for p in persons}
-            stale_ids = [tid for tid in state["global_id_cache"] if tid not in current_ids]
-            for tid in stale_ids:
-                del state["global_id_cache"][tid]
-
-            # NOTE: item_tracker.cleanup_item() yahan JAAN-BOOJH KAR nahi
-            # bulaya ja raha - woh update_concealment() ke BAAD chalega
-            # (neeche dekhein). Pehle yahan hota tha, jo ek bara bug tha:
-            # concealment_monitor ko "kya yeh item personal tha?" check
-            # karne se PEHLE hi origin record mit chuka hota tha, isliye
-            # har item (chahe genuinely personal ho) hamesha "None" origin
-            # dikhta tha aur false concealment alert ban jati thi.
-            current_item_ids = {it["id"] for it in items}
-
-            state["current_person_count"] = len(persons)
-
-            for p in persons:
-                state["unique_visitor_ids"].add(p["id"])
-
-            check_line_crossing(state, persons, line_y)
-
-            if state["zone_enabled"]:
-                persons = update_zone_tracking(persons, zone_box, Settings.SUSPICIOUS_DWELL_SECONDS)
-
-            # ---- Cross-Camera Re-ID: har person ko Global ID do, aur purane flags check karo ----
-            with profiler.stage(cam_id, "reid"):
-                persons = apply_person_reid(frame, persons, state)
-
-            # Step 1+2 (MediaPipe): pose sirf unn logon par jinke qareeb koi item ho
-            # (CPU bachane ke liye), phir dekho kis ke haath mein item hai
-            with profiler.stage(cam_id, "pose+pickup"):
-                pickup_monitor.refresh_poses(
-                    frame, persons, items, state["pose_cache"],
-                    lambda f, p: pose_monitor.detect_pose(f, p, cam_id),
-                )
-                pickup_monitor.update_pickups(persons, items, cam_id)
-
-            # ZAROORI: item registration ab yahan, apply_person_reid ke BAAD
-            # hoti hai - kyunke item_tracker ab "person['global_id']" use
-            # karta hai (personal-item reclaim feature ke liye). Pehle yeh
-            # ulta order tha (registration pehle, reid baad mein), isliye
-            # global_id hamesha None milta tha aur koi bhi item "personal"
-            # mark hi nahi ho pata tha, chahe person kitna bhi qareeb ho.
-            for item in items:
-                item_tracker.register_item_if_new(item, persons)
-
-            update_alerts(state, persons)
-
-            # Jo is camera mein NAYA suspicious hua, usay registry mein bhi note karo
-            for p in persons:
-                if p.get("suspicious", False):
-                    person_reid.mark_suspicious(p["global_id"], True)
-
-            # concealment_monitor ab do cheezein deta hai:
-            #  - active list (jo abhi on-screen dikhni chahiye)
-            #  - new_alerts (sirf woh jo ISI call mein "sustained threshold"
-            #    cross karke CONFIRM hui - inhi par video/log banega, taake
-            #    ek incident ka video/log baar baar na bane)
-            with profiler.stage(cam_id, "conceal"):
-                state["active_concealment_alerts"], new_concealment_alerts = update_concealment(persons, items)
-
-            if new_concealment_alerts:
-                _handle_new_concealment_incidents(new_concealment_alerts, state, cam_id)
-
-            # Ab (aur sirf ab) jo items frame mein nahi rahe, unki origin
-            # memory se hata do - concealment_monitor upar apna kaam kar
-            # chuka hai, ab record mitana safe hai.
-            stale_item_ids = [iid for iid in item_tracker.item_origins if iid not in current_item_ids]
-            for iid in stale_item_ids:
-                item_tracker.cleanup_item(iid)
-
-            # Har frame pe taaza check: kis person (GLOBAL ID se) ki koi
-            # concealment alert abhi active hai -> uski ID box red hogi
-            # (draw_tracks mein), warna green. Global ID use karne se yeh
-            # cross-camera bhi kaam karta hai: Camera 1 mein chori pakri jaye
-            # to wahi banda Camera 2 mein bhi turant red dikhega, aur jab
-            # item wapis aaye to dono jagah green wapis ho jayega.
-            concealment_flagged_ids = get_concealment_flagged_ids()
-            for p in persons:
-                p["concealment_flag"] = p["global_id"] in concealment_flagged_ids
-
-            # Pura processed result save kar lo - agle skip-frames isi ko
-            # dobara istemal karenge (koi dobara processing ki zaroorat nahi,
-            # kyunke sab attributes - global_id, suspicious, concealment_flag -
-            # already inhi dicts ke andar save ho chuke hain)
-            state["last_persons"] = persons
-            state["last_items"] = items
-        else:
-            # Is frame pe YOLO nahi chalaya - pichla PURA-PROCESSED result hi
-            # reuse karo (zone/reid/concealment sab dobara chalane ki zaroorat
-            # nahi, woh already in dicts mein save hai)
-            persons, items = state["last_persons"], state["last_items"]
+        persons = state["last_persons"]
+        items = state["last_items"]
+        baskets = state["last_baskets"]
 
         with profiler.stage(cam_id, "draw"):
-            frame = draw_tracks(frame, persons, items, zone_box, state["zone_enabled"])
+            frame = draw_tracks(frame, persons, items, baskets, zone_box, state["zone_enabled"])
 
         with profiler.stage(cam_id, "encode"):
             success, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
